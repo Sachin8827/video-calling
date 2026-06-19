@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "types": ["jest", "node"],
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@auth/*":         ["src/auth/*"],
+      "@users/*":        ["src/users/*"],
+      "@sessions/*":     ["src/sessions/*"],
+      "@common/*":       ["src/common/*"],
+      "@config/*":       ["src/config/*"],
+      "@calls/*":        ["src/calls/*"],
+      "@contacts/*":     ["src/contacts/*"],
+      "@matchmaking/*": ["src/matchmaking/*"],
+      "@sfu/*":          ["src/sfu/*"],
+      "@audit/*":        ["src/audit/*"],
+      "@redis/*":        ["src/redis/*"],
+      "@gateway/*":      ["src/gateway/*"]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "frontend"
+  ]
+}

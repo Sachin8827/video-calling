@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.env.local
+coverage/
+*.js.map
+*.log
+*.zip
+.next/
+dist/
+node_modules/

@@ -1,0 +1,10 @@
+version: "2"
+tunnels:
+  api:
+    proto: http
+    addr: 3000
+    host_header: rewrite
+  frontend:
+    proto: http
+    addr: 3001
+    host_header: rewrite

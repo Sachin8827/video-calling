@@ -1,0 +1,96 @@
+{
+  "name": "auth-module",
+  "version": "1.0.0",
+  "description": "Production-grade NestJS authentication module",
+  "author": "Security Architecture Team",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "test": "jest",
+    "test:cov": "jest --coverage",
+    "migration:run": "psql $DATABASE_URL -f src/database/migrations/001_create_auth_tables.sql",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/passport": "^10.0.3",
+    "@nestjs/platform-express": "^10.3.0",
+    "@nestjs/platform-socket.io": "^11.1.21",
+    "@nestjs/swagger": "^11.4.3",
+    "@nestjs/throttler": "^5.1.1",
+    "@nestjs/websockets": "^11.1.21",
+    "argon2": "^0.31.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "cookie-parser": "^1.4.6",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.10.1",
+    "joi": "^18.2.1",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pg": "^8.11.5",
+    "reflect-metadata": "^0.2.1",
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3",
+    "uuid": "^11.1.1",
+    "zxcvbn": "^4.4.2",
+    "mediasoup": "^3.20.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.17",
+    "@nestjs/schematics": "^11.1.0",
+    "@nestjs/testing": "^10.3.0",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.12.5",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/pg": "^8.11.5",
+    "@types/socket.io": "^3.0.1",
+
+    "@types/zxcvbn": "^4.4.4",
+    "@typescript-eslint/eslint-plugin": "^7.6.0",
+    "@typescript-eslint/parser": "^7.6.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "husky": "^9.1.7",
+    "jest-mock": "^30.4.1",
+    "lint-staged": "^17.0.5",
+    "prettier": "^3.8.3",
+    "typescript": "^5.4.4"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
+    "testEnvironment": "node"
+  },
+  "overrides": {
+    "js-yaml": "4.2.0",
+    "multer": "2.2.0",
+    "qs": "6.15.2",
+    "ws": "8.21.0",
+    "lodash": "4.18.1",
+    "tar": "7.5.16",
+    "file-type": "21.3.2"
+  }
+}
