@@ -10,6 +10,7 @@ export function useSignaling() {
   useEffect(() => {
     // Attempt to connect immediately. If a token exists in localStorage, attach it.
     const token = localStorage.getItem("access_token");
+    console.log("[signaling] auth token", token ? "present" : "none");
     if (token) {
       socket.auth = { token };
     } else {
@@ -18,8 +19,14 @@ export function useSignaling() {
 
     socket.connect();
 
-    const onConnect = () => setIsConnected(true);
-    const onDisconnect = () => setIsConnected(false);
+    const onConnect = () => {
+      console.log("[signaling] connected", socket.id);
+      setIsConnected(true);
+    };
+    const onDisconnect = () => {
+      console.log("[signaling] disconnected", socket.id);
+      setIsConnected(false);
+    };
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -33,6 +40,7 @@ export function useSignaling() {
 
   // Expose typed wrappers
   const emit = useCallback((event: string, payload?: any) => {
+    console.log("[signaling] emit", event, payload);
     socket.emit(event, payload);
   }, [socket]);
 

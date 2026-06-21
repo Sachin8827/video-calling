@@ -4,6 +4,8 @@ services:
     image: postgres:16-alpine
     container_name: comms_postgres
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-comms_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-comms_pass}
@@ -22,6 +24,8 @@ services:
     image: redis:7-alpine
     container_name: comms_redis
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data

@@ -9,3 +9,5 @@ coverage/
 .next/
 dist/
 node_modules/
+/scripts
+graphify-out/

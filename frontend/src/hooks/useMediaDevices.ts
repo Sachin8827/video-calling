@@ -1,22 +1,28 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 export function useMediaDevices() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const startMedia = useCallback(async (video = true, audio = true) => {
     try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: video ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
         audio: audio,
       });
+      streamRef.current = mediaStream;
       setStream(mediaStream);
-      setCameraEnabled(video);
-      setMicEnabled(audio);
+      setCameraEnabled(video && mediaStream.getVideoTracks().some((track) => track.enabled));
+      setMicEnabled(audio && mediaStream.getAudioTracks().some((track) => track.enabled));
       setError(null);
       return mediaStream;
     } catch (err: any) {
@@ -26,31 +32,42 @@ export function useMediaDevices() {
   }, []);
 
   const stopMedia = useCallback(() => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
       setStream(null);
+      setCameraEnabled(false);
+      setMicEnabled(false);
     }
-  }, [stream]);
+  }, []);
 
   const toggleMic = useCallback(() => {
-    if (stream) {
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setMicEnabled(audioTrack.enabled);
-      }
+    const currentStream = streamRef.current;
+    if (!currentStream) return;
+
+    const audioTrack = currentStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      setMicEnabled(audioTrack.enabled);
+      return;
     }
-  }, [stream]);
+
+    setMicEnabled(false);
+  }, []);
 
   const toggleCamera = useCallback(() => {
-    if (stream) {
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setCameraEnabled(videoTrack.enabled);
-      }
+    const currentStream = streamRef.current;
+    if (!currentStream) return;
+
+    const videoTrack = currentStream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      setCameraEnabled(videoTrack.enabled);
+      return;
     }
-  }, [stream]);
+
+    setCameraEnabled(false);
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {

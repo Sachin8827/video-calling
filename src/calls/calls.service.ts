@@ -4,17 +4,19 @@ import { CallsRepository } from './calls.repository';
 import { AuditService } from '../audit/audit.service';
 import { AuditEventType } from '../audit/audit-event.enum';
 import { CallSessionRecord } from './interfaces/call.interfaces';
+import { AppLogger } from '../common/logger/app-logger.service';
 
 @Injectable()
 export class CallsService {
   constructor(
     private readonly callsRepo: CallsRepository,
     private readonly auditService: AuditService,
+    private readonly logger: AppLogger,
   ) {}
 
   /** Initiate a 1:1 or group call session. */
   async initiateCall(params: {
-    initiatorId: string;
+    initiatorId?: string | null;
     anonymousId?: string;
     callType: 'voice' | 'video' | 'group';
     isAnonymous: boolean;
@@ -32,19 +34,20 @@ export class CallsService {
 
     await this.callsRepo.addParticipant({
       callSessionId: session.id,
-      userId: params.isAnonymous ? undefined : params.initiatorId,
-      anonymousId: params.isAnonymous ? (params.anonymousId ?? params.initiatorId) : undefined,
+      userId: params.isAnonymous ? undefined : (params.initiatorId ?? undefined),
+      anonymousId: params.isAnonymous ? (params.anonymousId ?? params.initiatorId ?? undefined) : undefined,
       role: 'host',
       cameraEnabled: params.callType !== 'voice',
     });
 
     await this.auditService.log({
-      userId: params.initiatorId,
+      userId: params.initiatorId ?? undefined,
       eventType: AuditEventType.CALL_INITIATED,
       payload: { callId: session.id, callType: params.callType, isAnonymous: params.isAnonymous },
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
     });
+    this.logger.log(`CallsService.initiateCall created session ${session.id} initiatorId=${params.initiatorId ?? 'anon'} anonymousId=${params.anonymousId}`);
 
     return session;
   }
@@ -52,7 +55,7 @@ export class CallsService {
   /** Accept a call — marks it as active, adds callee as participant. */
   async acceptCall(params: {
     callId: string;
-    userId: string;
+    userId?: string;
     anonymousId?: string;
     isAnonymous?: boolean;
     callType: 'voice' | 'video';
@@ -62,22 +65,25 @@ export class CallsService {
     const session = await this.callsRepo.findById(params.callId);
     if (!session) throw new NotFoundException('Call not found');
 
+    const isAnonymous = params.isAnonymous ?? !params.userId;
+
     await this.callsRepo.updateStatus(params.callId, 'active', { answeredAt: true });
     await this.callsRepo.addParticipant({
       callSessionId: params.callId,
-      userId: params.isAnonymous ? undefined : params.userId,
-      anonymousId: params.isAnonymous ? (params.anonymousId ?? params.userId) : undefined,
+      userId: isAnonymous ? undefined : params.userId,
+      anonymousId: isAnonymous ? (params.anonymousId ?? params.userId) : undefined,
       role: 'guest',
       cameraEnabled: params.callType === 'video',
     });
 
     await this.auditService.log({
-      userId: params.userId,
+      userId: isAnonymous ? undefined : params.userId,
       eventType: AuditEventType.CALL_ACCEPTED,
       payload: { callId: params.callId },
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
     });
+    this.logger.log(`CallsService.acceptCall accepted session ${params.callId} userId=${params.userId ?? 'anon'} anonymousId=${params.anonymousId}`);
 
     return (await this.callsRepo.findById(params.callId))!;
   }

@@ -10,7 +10,7 @@ export class CallsRepository {
   // ── Sessions ────────────────────────────────────────────────
 
   async createSession(params: {
-    initiatorId: string;
+    initiatorId?: string | null;
     callType: 'voice' | 'video' | 'group';
     isAnonymous: boolean;
     roomId?: string;

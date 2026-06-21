@@ -18,13 +18,13 @@ export default function Dashboard() {
     emit("call:initiate", { targetUserId, callType: type });
     // Assuming backend returns a callId via signal, but for demo:
     const demoCallId = `call-${Math.random().toString(36).substr(2, 9)}`;
-    router.push(`/call/${demoCallId}`);
+    router.push(`/call?callId=${demoCallId}&initiator=true`);
   };
 
   const handleCreateGroup = () => {
     // Generate a random room ID for the group call
     const roomId = `room-${Math.random().toString(36).substr(2, 9)}`;
-    router.push(`/room/${roomId}`);
+    router.push(`/room?roomId=${roomId}`);
   };
 
   return (

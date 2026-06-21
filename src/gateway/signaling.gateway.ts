@@ -56,7 +56,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly contactsService: ContactsService,
     private readonly sfuService: SfuService,
     private readonly auditService: AuditService,
-  ) {}
+  ) { }
 
   // ── Connection ───────────────────────────────────────────────────────────
 
@@ -73,13 +73,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (token) {
       try {
         const payload = this.jwtService.verify<{ sub: string }>(token);
-        userId = payload.sub;
-        // Support multiple tabs: add socket to user's set
-        const existing = this.userSockets.get(userId);
-        if (existing) {
-          existing.add(socket.id);
-        } else {
-          this.userSockets.set(userId, new Set([socket.id]));
+        userId = payload.sub?.trim() || undefined;
+        if (userId) {
+          // Support multiple tabs: add socket to user's set
+          const existing = this.userSockets.get(userId);
+          if (existing) {
+            existing.add(socket.id);
+          } else {
+            this.userSockets.set(userId, new Set([socket.id]));
+          }
         }
       } catch {
         // Invalid token — treat as anonymous
@@ -94,12 +96,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     };
     this.sockets.set(socket.id, meta);
 
-    this.logger.log(`Socket connected: ${socket.id} userId=${userId ?? 'anon'}`);
+    this.logger.log(`Socket connected: ${socket.id} userId=${userId ?? 'anon'} ip=${ipAddress}`);
+    await this.broadcastQueueStatus();
   }
 
   async handleDisconnect(socket: Socket): Promise<void> {
     const meta = this.sockets.get(socket.id);
     if (!meta) return;
+
+    this.logger.log(`Socket disconnected: ${socket.id} userId=${meta.userId ?? 'anon'} callId=${meta.callId ?? 'none'}`);
 
     // Clean up matchmaking queue
     await this.matchmaking.dequeue(socket.id);
@@ -143,6 +148,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
     }
     this.sockets.delete(socket.id);
+    await this.broadcastQueueStatus();
   }
 
   // ── 1:1 Call Events ──────────────────────────────────────────────────────
@@ -154,6 +160,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() data: { targetUserId: string; callType: 'voice' | 'video' },
   ) {
     const meta = this.getMeta(socket);
+    this.logger.log(`call:initiate request from ${socket.id} target=${data.targetUserId} callType=${data.callType}`);
 
     const session = await this.callsService.initiateCall({
       initiatorId: meta.userId ?? meta.anonymousId,
@@ -169,6 +176,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     // Track intended target for authorization on accept (BUG-9 fix)
     this.pendingCallTargets.set(session.id, data.targetUserId);
+    this.logger.log(`call:initiate created session ${session.id} pendingTarget=${data.targetUserId}`);
 
     // Notify target if online (use first socket from their set)
     const targetSocketSet = this.userSockets.get(data.targetUserId);
@@ -211,6 +219,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() data: { callId: string; callType: 'voice' | 'video' },
   ) {
     const meta = this.getMeta(socket);
+    this.logger.log(`call:accept request from ${socket.id} callId=${data.callId} callType=${data.callType}`);
     if (!meta.userId) throw new WsException('Authentication required');
 
     // BUG-9 fix: Verify the acceptor is the intended target
@@ -239,12 +248,14 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.pendingCallTargets.delete(data.callId);
 
     this.server.to(data.callId).emit('call:accepted', { callId: data.callId });
+    this.logger.log(`call:accepted emitted for ${data.callId}`);
     return { ok: true };
   }
 
   @SubscribeMessage('call:reject')
   async onCallReject(@ConnectedSocket() socket: Socket, @MessageBody() data: { callId: string }) {
     const meta = this.getMeta(socket);
+    this.logger.log(`call:reject request from ${socket.id} callId=${data.callId}`);
     if (!meta.userId) throw new WsException('Authentication required');
 
     await this.callsService.endCall({
@@ -264,12 +275,14 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.pendingCallTargets.delete(data.callId);
 
     this.server.to(data.callId).emit('call:rejected', { callId: data.callId });
+    this.logger.log(`call:rejected emitted for ${data.callId}`);
     return { ok: true };
   }
 
   @SubscribeMessage('call:end')
   async onCallEnd(@ConnectedSocket() socket: Socket, @MessageBody() data: { callId: string }) {
     const meta = this.getMeta(socket);
+    this.logger.log(`call:end request from ${socket.id} callId=${data.callId}`);
 
     await this.callsService.endCall({
       callId: data.callId,
@@ -288,7 +301,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
     this.pendingCallTargets.delete(data.callId);
 
-    this.server.to(data.callId).emit('call:ended', { callId: data.callId });
+    this.server.to(data.callId).emit('call:ended', { callId: data.callId, reason: 'ended' });
+    this.logger.log(`call:ended emitted for ${data.callId}`);
     socket.leave(data.callId);
     meta.callId = undefined;
     return { ok: true };
@@ -378,6 +392,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() data: { preferredType?: 'voice' | 'video' },
   ) {
     const meta = this.getMeta(socket);
+    this.logger.log(`match:join-queue from ${socket.id} preferredType=${data.preferredType}`);
 
     const position = await this.matchmaking.enqueue({
       userId: meta.userId,
@@ -387,79 +402,120 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       isAnonymous: !meta.userId,
     });
 
-    socket.emit('match:queued', { position });
+    const onlineUsers = this.countOnlineUsers();
+    const searchingUsers = await this.matchmaking.queueDepth();
+    const payload = { position, onlineUsers, searchingUsers };
+    this.logger.log(`match:queued payload: ${JSON.stringify(payload)}`);
+    socket.emit('match:queued', payload);
 
     // Try to find a match immediately
     await this.tryPairUsers();
-    return { queued: true };
+    await this.broadcastQueueStatus();
+    return { queued: true, onlineUsers, searchingUsers };
   }
 
   @SubscribeMessage('match:leave-queue')
   async onLeaveQueue(@ConnectedSocket() socket: Socket) {
+    this.logger.log(`match:leave-queue from ${socket.id}`);
     await this.matchmaking.dequeue(socket.id);
+    await this.broadcastQueueStatus();
     return { ok: true };
   }
 
+  @SubscribeMessage('match:queue-status-request')
+  async onQueueStatusRequest(@ConnectedSocket() socket: Socket) {
+    const onlineUsers = this.sockets.size;
+    const searchingUsers = await this.matchmaking.queueDepth();
+    this.logger.log(`match:queue-status-request => online=${onlineUsers}, searching=${searchingUsers}`);
+    socket.emit('match:queue-status', { onlineUsers, searchingUsers });
+    return { onlineUsers, searchingUsers };
+  }
+
+  private countOnlineUsers(): number {
+    const uniqueUsers = new Set<string>();
+    for (const meta of this.sockets.values()) {
+      uniqueUsers.add(meta.userId ?? meta.anonymousId);
+    }
+    return uniqueUsers.size;
+  }
+
+  private async broadcastQueueStatus(): Promise<void> {
+    const onlineUsers = this.countOnlineUsers();
+    const searchingUsers = await this.matchmaking.queueDepth();
+    this.server.emit('match:queue-status', { onlineUsers, searchingUsers });
+  }
+
   private async tryPairUsers(): Promise<void> {
-    const pair = await this.matchmaking.tryMatch();
-    if (!pair) return;
+    try {
+      const pair = await this.matchmaking.tryMatch();
+      if (!pair) {
+        this.logger.log('tryPairUsers: no match available');
+        return;
+      }
 
-    const [a, b] = pair;
-    const callType = a.preferredType === b.preferredType ? a.preferredType : 'video';
+      const [a, b] = pair;
+      this.logger.log(`tryPairUsers: matched sockets ${a.socketId} and ${b.socketId}`);
+      const callType = a.preferredType === b.preferredType ? a.preferredType : 'video';
 
-    // Create an anonymous call session
-    const session = await this.callsService.initiateCall({
-      initiatorId: a.userId ?? a.anonymousId,
-      anonymousId: a.userId ? undefined : a.anonymousId,
-      callType,
-      isAnonymous: true,
-      ipAddress: 'anonymous',
-      userAgent: '',
-    });
+      // Create an anonymous call session
+      this.logger.log(`tryPairUsers: initiating anonymous call for ${a.socketId} as initiator`);
+      const session = await this.callsService.initiateCall({
+        initiatorId: a.userId ?? null,
+        anonymousId: a.userId ? undefined : a.anonymousId,
+        callType,
+        isAnonymous: true,
+        ipAddress: 'anonymous',
+        userAgent: '',
+      });
+      this.logger.log(`tryPairUsers: call session created ${session.id}`);
 
-    await this.callsService.acceptCall({
-      callId: session.id,
-      userId: b.userId ?? b.anonymousId,
-      anonymousId: b.userId ? undefined : b.anonymousId,
-      isAnonymous: !b.userId,
-      callType,
-      ipAddress: 'anonymous',
-      userAgent: '',
-    });
+      this.logger.log(`tryPairUsers: accepting call for ${b.socketId}`);
+      await this.callsService.acceptCall({
+        callId: session.id,
+        userId: b.userId || b.anonymousId,
+        anonymousId: b.userId ? undefined : b.anonymousId,
+        isAnonymous: !b.userId,
+        callType,
+        ipAddress: 'anonymous',
+        userAgent: '',
+      });
+      this.logger.log(`tryPairUsers: call accepted for ${session.id}`);
 
-    // Add both to a shared socket.io room
-    const socketA = this.server.sockets.sockets.get(a.socketId);
-    const socketB = this.server.sockets.sockets.get(b.socketId);
+      // Join both sockets to the call room using the public Socket.IO API.
+      await this.server.in(a.socketId).socketsJoin(session.id);
+      await this.server.in(b.socketId).socketsJoin(session.id);
 
-    if (socketA) {
-      await socketA.join(session.id);
       const metaA = this.sockets.get(a.socketId);
       if (metaA) metaA.callId = session.id;
-    }
-    if (socketB) {
-      await socketB.join(session.id);
       const metaB = this.sockets.get(b.socketId);
       if (metaB) metaB.callId = session.id;
+
+      // Notify both parties of the match
+      const bothRegistered = !!a.userId && !!b.userId;
+      this.logger.log(`match:found emit for ${a.socketId} and ${b.socketId} callId=${session.id} initiator=${a.socketId}`);
+
+      this.server.to(a.socketId).emit('match:found', {
+        callId: session.id,
+        callType,
+        isInitiator: true,
+        bothRegistered,
+        partnerUserId: b.userId,
+      });
+
+      this.server.to(b.socketId).emit('match:found', {
+        callId: session.id,
+        callType,
+        isInitiator: false,
+        bothRegistered,
+        partnerUserId: a.userId,
+      });
+    } catch (error) {
+      const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+      this.logger.error(`tryPairUsers error`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(`tryPairUsers raw error`, errorDetails);
+      console.error('tryPairUsers caught error:', error);
+      throw error;
     }
-
-    // Notify both parties of the match
-    const bothRegistered = !!a.userId && !!b.userId;
-
-    this.server.to(a.socketId).emit('match:found', {
-      callId: session.id,
-      callType,
-      isInitiator: true,
-      bothRegistered,
-      partnerUserId: b.userId,
-    });
-
-    this.server.to(b.socketId).emit('match:found', {
-      callId: session.id,
-      callType,
-      isInitiator: false,
-      bothRegistered,
-      partnerUserId: a.userId,
-    });
   }
 
   // ── SFU (Group Calls) ─────────────────────────────────────────────────────

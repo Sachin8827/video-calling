@@ -1,14 +1,12 @@
+// next.config.ts
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  allowedDevOrigins: [
-    "localhost:3001",
-    "atlas-unincarnate-natalia.ngrok-free.dev",
-    "*.ngrok-free.dev",
-    "*.ngrok.app",
-    "*.ngrok-free.app"
-  ]
+  output: "export",
+  images: {
+    unoptimized: true,
+  },
+  trailingSlash: true,
 };
 
 export default nextConfig;

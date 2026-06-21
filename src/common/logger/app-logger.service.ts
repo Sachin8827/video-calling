@@ -45,13 +45,20 @@ export class AppLogger implements LoggerService {
   }
 
   /** Logs an error — stack is printed in development, suppressed in production */
-  error(event: LogEvent, error: unknown, meta: Omit<LogContext, 'event'> = {}): void {
+  error(event: any, error?: any, meta: any = {}): void {
+    const isMetaString = typeof meta === 'string';
+    const actualMeta = typeof meta === 'object' && meta !== null ? meta : (isMetaString ? { providedContext: meta } : {});
+    
     const entry = this.build('ERROR', event, {
-      ...meta,
-      errorMessage: error instanceof Error ? error.message : String(error),
+      ...actualMeta,
+      errorMessage: error instanceof Error ? error.message : (error ? String(error) : undefined),
     });
-    const stack =
-      process.env.NODE_ENV !== 'production' && error instanceof Error ? error.stack : undefined;
+    
+    let stack = undefined;
+    if (process.env.NODE_ENV !== 'production') {
+      if (error instanceof Error) stack = error.stack;
+      else if (typeof error === 'string') stack = error;
+    }
 
     this.nest.error(entry, stack, this.context);
   }

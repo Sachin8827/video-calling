@@ -16,26 +16,31 @@ export function VideoTile({ stream, isMuted, isLocal, name, className }: VideoTi
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream ?? null;
     }
   }, [stream]);
 
-  // If there's a stream but no video tracks (or they are disabled), we show an avatar fallback.
-  const hasVideo = stream && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
+  const hasVideo = Boolean(
+    stream && stream.getVideoTracks().length > 0,
+  );
 
   return (
     <div className={cn("relative rounded-2xl overflow-hidden bg-slate-800 border border-slate-700 shadow-lg group", className)}>
-      {stream && hasVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isLocal} // Always mute local video to prevent feedback loop
-          className={cn("w-full h-full object-cover", isLocal && "scale-x-[-1]")} // Mirror local video
-        />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-800">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={isLocal}
+        className={cn(
+          "w-full h-full object-cover transition-opacity duration-300",
+          isLocal && "scale-x-[-1]",
+          !hasVideo && "opacity-0",
+        )}
+      />
+
+      {!hasVideo && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-800 transition-opacity duration-300">
           <div className="w-24 h-24 rounded-full bg-slate-700 flex items-center justify-center text-3xl font-bold text-slate-400">
             {name ? name.charAt(0).toUpperCase() : "?"}
           </div>

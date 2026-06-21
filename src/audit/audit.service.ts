@@ -3,6 +3,10 @@ import { Pool } from 'pg';
 import { DATABASE_POOL } from '../database/database.module';
 import { AuditEventType } from './audit-event.enum';
 
+function isValidIp(ip: string): boolean {
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip) || /^[0-9a-fA-F:]+$/.test(ip);
+}
+
 export interface AuditEntry {
   userId?: string;
   anonymousId?: string;
@@ -31,7 +35,7 @@ export class AuditService {
           entry.anonymousId ?? null,
           entry.eventType,
           JSON.stringify(entry.payload ?? {}),
-          entry.ipAddress ?? null,
+          entry.ipAddress && isValidIp(entry.ipAddress) ? entry.ipAddress : null,
           entry.userAgent ?? null,
         ],
       );

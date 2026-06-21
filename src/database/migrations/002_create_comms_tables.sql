@@ -6,7 +6,7 @@
 -- ── Call Sessions ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS call_sessions (
   id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  initiator_id     UUID        NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+  initiator_id     UUID                 REFERENCES users(id) ON DELETE SET NULL,
   call_type        VARCHAR(10) NOT NULL CHECK (call_type IN ('voice', 'video', 'group')),
   status           VARCHAR(20) NOT NULL DEFAULT 'initiated'
                                CHECK (status IN ('initiated', 'active', 'ended', 'missed', 'rejected')),

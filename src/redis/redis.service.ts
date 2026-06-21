@@ -22,7 +22,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       maxRetriesPerRequest: 3,
     });
     this.client.on('error', (err) => {
-      this.logger.error(`Redis error: ${err.message}`);
+      this.logger.error('Redis connection error', err);
     });
     this.client.on('connect', () => {
       this.logger.log('Redis connected');

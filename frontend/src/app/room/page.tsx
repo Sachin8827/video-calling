@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, Suspense } from "react";
 import { useMediaDevices } from "@/hooks/useMediaDevices";
 import { useSFU } from "@/hooks/useSFU";
 import { useSignaling } from "@/hooks/useSignaling";
@@ -8,12 +8,13 @@ import { VideoGrid } from "@/components/VideoGrid";
 import { CallControls } from "@/components/CallControls";
 import { ArrowLeft, Users } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function GroupRoom({ params }: { params: Promise<{ roomId: string }> }) {
+function RoomContent() {
   const router = useRouter();
-  const { roomId } = use(params);
-  
+  const searchParams = useSearchParams();
+  const roomId = searchParams.get("roomId") || "default";
+
   const { emit, isConnected } = useSignaling();
   const { stream: localStream, startMedia, stopMedia, micEnabled, cameraEnabled, toggleMic, toggleCamera } = useMediaDevices();
   const { consumers, error } = useSFU({ roomId, localStream });
@@ -74,5 +75,13 @@ export default function GroupRoom({ params }: { params: Promise<{ roomId: string
         onEndCall={handleLeave}
       />
     </div>
+  );
+}
+
+export default function GroupRoom() {
+  return (
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center bg-slate-900 text-white">Loading room...</div>}>
+      <RoomContent />
+    </Suspense>
   );
 }
