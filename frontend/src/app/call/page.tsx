@@ -9,6 +9,7 @@ import { VideoTile } from "@/components/VideoTile";
 import { CallControls } from "@/components/CallControls";
 import { ArrowLeft, UserCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 function CallContent() {
   const router = useRouter();
@@ -137,8 +138,10 @@ function CallContent() {
 
 export default function DirectCallRoom() {
   return (
-    <Suspense fallback={<div className="flex-1 flex items-center justify-center bg-slate-900 text-white">Loading call...</div>}>
-      <CallContent />
-    </Suspense>
+    <ProtectedRoute>
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center bg-slate-900 text-white">Loading call...</div>}>
+        <CallContent />
+      </Suspense>
+    </ProtectedRoute>
   );
 }

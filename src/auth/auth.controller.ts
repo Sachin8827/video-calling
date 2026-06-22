@@ -8,6 +8,7 @@ import {
   Req,
   Res,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
@@ -89,9 +90,7 @@ export class AuthController {
       (req.body as { refreshToken?: string }).refreshToken;
 
     if (!rawRefreshToken) {
-      return res
-        .status(HttpStatus.UNAUTHORIZED)
-        .json({ message: 'No refresh token provided.' }) as never;
+      throw new UnauthorizedException('No refresh token provided.');
     }
 
     const tokens = await this.authService.refresh(

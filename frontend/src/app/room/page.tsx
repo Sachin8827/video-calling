@@ -9,6 +9,7 @@ import { CallControls } from "@/components/CallControls";
 import { ArrowLeft, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 function RoomContent() {
   const router = useRouter();
@@ -78,10 +79,12 @@ function RoomContent() {
   );
 }
 
-export default function GroupRoom() {
+export default function GroupCallRoom() {
   return (
-    <Suspense fallback={<div className="flex-1 flex items-center justify-center bg-slate-900 text-white">Loading room...</div>}>
-      <RoomContent />
-    </Suspense>
+    <ProtectedRoute>
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center bg-slate-900 text-white">Loading room...</div>}>
+        <RoomContent />
+      </Suspense>
+    </ProtectedRoute>
   );
 }
