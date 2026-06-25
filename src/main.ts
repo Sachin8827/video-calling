@@ -1,4 +1,4 @@
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -51,10 +51,15 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
 
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGIN ?? 'http://localhost:3001',
+    origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', HttpHeader.CSRF_TOKEN],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      HttpHeader.CSRF_TOKEN,
+      'ngrok-skip-browser-warning',
+    ],
   });
 
   app.useGlobalPipes(globalValidationPipe);

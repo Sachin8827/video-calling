@@ -18,8 +18,10 @@ function CallContent() {
   const initiatorParam = searchParams.get("initiator");
   const [isInitiator] = useState(initiatorParam === "1" || initiatorParam === "true");
   const [callType, setCallType] = useState<"voice" | "video">("video");
+  const [partnerUserId, setPartnerUserId] = useState<string | null>(null);
+  const [contactRequestSent, setContactRequestSent] = useState(false);
 
-  const { emit } = useSignaling();
+  const { emit, on } = useSignaling();
   const { stream: localStream, startMedia, stopMedia, micEnabled, cameraEnabled, toggleMic, toggleCamera } = useMediaDevices();
   const { remoteStream, endCall } = useWebRTC({
     callId,
@@ -42,6 +44,34 @@ function CallContent() {
       stopMedia();
     };
   }, [callId, router, startMedia, stopMedia, callType]);
+
+  useEffect(() => {
+    // Listen for call accepted to capture partner user ID
+    const cleanupAccepted = on("call:accepted", (data: any) => {
+      if (isInitiator && data.acceptorId) {
+        setPartnerUserId(data.acceptorId);
+      } else if (!isInitiator && data.initiatorId) {
+        setPartnerUserId(data.initiatorId);
+      }
+    });
+
+    const cleanupIncoming = on("call:incoming", (data: any) => {
+      if (data.callId === callId && data.callerId) {
+        setPartnerUserId(data.callerId);
+      }
+    });
+
+    return () => {
+      cleanupAccepted();
+      cleanupIncoming();
+    };
+  }, [on, isInitiator, callId]);
+
+  const handleSaveContact = () => {
+    if (!partnerUserId) return;
+    emit("contact:request-save", { callId, toUserId: partnerUserId });
+    setContactRequestSent(true);
+  };
 
   const handleLeave = () => {
     endCall();
@@ -71,6 +101,20 @@ function CallContent() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-4 pointer-events-auto">
+          {partnerUserId && !contactRequestSent && (
+            <button 
+              onClick={handleSaveContact}
+              className="glass-panel px-4 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20 transition-colors"
+            >
+              <UserCircle className="w-4 h-4" />
+              <span>Save Contact</span>
+            </button>
+          )}
+          {contactRequestSent && (
+            <div className="glass-panel px-4 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium text-green-400">
+              <span>Request Sent!</span>
+            </div>
+          )}
           <div className="glass-panel px-4 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium text-slate-200">
             <UserCircle className="w-4 h-4 text-brand-400" />
             <span>1:1 Call</span>
@@ -105,17 +149,17 @@ function CallContent() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full h-full flex flex-col md:flex-row gap-4 max-w-7xl mx-auto"
+              className="absolute inset-0 bg-black z-0"
             >
-              <div className="flex-1 relative h-full min-h-[50vh]">
+              <div className="w-full h-full">
                 <VideoTile
                   stream={remoteStream}
                   name="Contact"
-                  className="w-full h-full shadow-[0_0_30px_rgba(37,99,235,0.1)] border-brand-500/20"
+                  className="w-full h-full rounded-none border-none object-cover"
                 />
               </div>
 
-              <div className="w-full md:w-1/3 h-64 md:h-full max-h-[50vh] md:max-h-none">
+              <div className="absolute bottom-24 right-4 w-48 h-64 shadow-2xl rounded-2xl overflow-hidden border border-slate-700/50 transition-all z-10 hover:scale-105">
                 <VideoTile stream={localStream} isLocal isMuted name="You" className="w-full h-full" />
               </div>
             </motion.div>

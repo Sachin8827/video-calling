@@ -1,12 +1,13 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { apiFetch, setAccessToken } from '@/lib/api';
+import { apiFetch, setAccessToken, setRefreshToken, refreshAuthToken } from '@/lib/api';
 import { useRouter, usePathname } from 'next/navigation';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
+  userEmail: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -17,23 +18,28 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     // Attempt to silently refresh token on initial load
+    let mounted = true;
     const initAuth = async () => {
       try {
-        const res = await apiFetch('/auth/refresh', { method: 'POST' });
-        if (res.ok) {
-          setIsAuthenticated(true);
+        const refreshed = await refreshAuthToken();
+        if (refreshed) {
+          if (mounted) {
+            setIsAuthenticated(true);
+            setUserEmail(localStorage.getItem('userEmail'));
+          }
         } else {
-          setIsAuthenticated(false);
+          if (mounted) setIsAuthenticated(false);
         }
       } catch (error) {
-        setIsAuthenticated(false);
+        if (mounted) setIsAuthenticated(false);
       } finally {
-        setIsLoading(false);
+        if (mounted) setIsLoading(false);
       }
     };
 
@@ -42,16 +48,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Listen for unauthorized events from api.ts
     const handleUnauthorized = () => {
       setIsAuthenticated(false);
-      if (pathname !== '/login' && pathname !== '/register') {
-        router.push('/login');
-      }
+      router.push('/login');
     };
 
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => {
+      mounted = false;
       window.removeEventListener('auth:unauthorized', handleUnauthorized);
     };
-  }, [router, pathname]);
+  }, []); // Only run once on mount
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);
@@ -66,9 +71,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(data.message || 'Login failed');
       }
       const data = await res.json();
-      setAccessToken(data.accessToken);
+      setAccessToken(data.data.accessToken);
+      setRefreshToken(data.data.refreshToken);
       setIsAuthenticated(true);
+      setUserEmail(email);
+      localStorage.setItem('userEmail', email);
       router.push('/dashboard');
+    } catch (error) {
+      console.error(error);
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -101,14 +112,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error(e);
     } finally {
       setAccessToken(null);
+      setRefreshToken(null);
       setIsAuthenticated(false);
+      setUserEmail(null);
+      localStorage.removeItem('userEmail');
       setIsLoading(false);
       router.push('/login');
     }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, userEmail, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -12,6 +12,7 @@ import { ContactSaveBanner } from "@/components/ContactSaveBanner";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
 
 export default function AnonymousRoom() {
   const router = useRouter();
@@ -22,6 +23,8 @@ export default function AnonymousRoom() {
   const [callId, setCallId] = useState<string | null>(null);
   const [isInitiator, setIsInitiator] = useState(false);
   const [showContactSave, setShowContactSave] = useState(false);
+  const [incomingRequestId, setIncomingRequestId] = useState<string | null>(null);
+  const [contactRequestSent, setContactRequestSent] = useState(false);
   const [partnerInfo, setPartnerInfo] = useState<any>(null);
   const [onlineUsers, setOnlineUsers] = useState(0);
   const [searchingUsers, setSearchingUsers] = useState(0);
@@ -37,6 +40,7 @@ export default function AnonymousRoom() {
       setCallId(null);
       setPartnerInfo(null);
       setIsInitiator(false);
+      setContactRequestSent(false);
       setMatchState("queue");
       queuedRef.current = true;
       emit("match:join-queue", { preferredType: "video" });
@@ -69,12 +73,19 @@ export default function AnonymousRoom() {
       setPartnerInfo(data);
       setMatchState("matched");
       setShowContactSave(false);
+      setContactRequestSent(false);
     });
 
     const unsubStatus = on("match:queue-status", (data) => {
       console.log("[anonymous] match:queue-status", data);
       setOnlineUsers(data.onlineUsers ?? 0);
       setSearchingUsers(data.searchingUsers ?? 0);
+    });
+
+    const unsubSaveRequest = on("contact:save-request", (data: any) => {
+      console.log("[anonymous] contact:save-request received", data);
+      setIncomingRequestId(data.requestId);
+      setShowContactSave(true);
     });
 
     if (isConnected) {
@@ -94,6 +105,7 @@ export default function AnonymousRoom() {
       unsubQueued();
       unsubMatch();
       unsubStatus();
+      unsubSaveRequest();
     };
   }, [on, isConnected, emit, matchState, showContactSave]);
 
@@ -106,16 +118,39 @@ export default function AnonymousRoom() {
     setCallId(null);
     setPartnerInfo(null);
     setShowContactSave(false);
+    setContactRequestSent(false);
     setMatchState("idle");
     router.push("/");
   };
 
-  const handleContactResponse = (accept: boolean) => {
-    console.log("[anonymous] handleContactResponse", { accept, callId, partnerInfo });
+  const handleContactResponse = async (accept: boolean) => {
+    console.log("[anonymous] handleContactResponse", { accept, incomingRequestId });
     setShowContactSave(false);
-    if (accept && callId && partnerInfo) {
-      emit("contact:save-request", { callId, targetUserId: partnerInfo.userId });
+
+    if (incomingRequestId) {
+      try {
+        if (accept) {
+          await apiFetch('/contacts/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId: incomingRequestId })
+          });
+        } else {
+          await apiFetch(`/contacts/reject/${incomingRequestId}`, {
+            method: 'POST'
+          });
+        }
+      } catch (e) {
+        console.error("Failed to respond to contact request", e);
+      }
     }
+    setIncomingRequestId(null);
+  };
+
+  const handleSaveContact = () => {
+    if (!partnerInfo?.partnerUserId || !callId) return;
+    emit("contact:request-save", { callId, toUserId: partnerInfo.partnerUserId });
+    setContactRequestSent(true);
   };
 
   return (
@@ -129,8 +164,27 @@ export default function AnonymousRoom() {
         >
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <div className="glass-panel px-4 py-1.5 rounded-full text-sm font-medium text-brand-300">
-          Anonymous Mode
+        <div className="flex items-center gap-4 pointer-events-auto">
+          {(() => {
+            console.log("[anonymous] Render Save Contact Check -> matchState:", matchState, "partnerInfo:", partnerInfo);
+            return matchState === "matched" && partnerInfo?.bothRegistered && !contactRequestSent && (
+              <button
+                onClick={handleSaveContact}
+                className="glass-panel px-4 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" x2="19" y1="8" y2="14" /><line x1="22" x2="16" y1="11" y2="11" /></svg>
+                <span>Save Contact</span>
+              </button>
+            );
+          })()}
+          {matchState === "matched" && contactRequestSent && (
+            <div className="glass-panel px-4 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium text-green-400">
+              <span>Request Sent!</span>
+            </div>
+          )}
+          <div className="glass-panel px-4 py-1.5 rounded-full text-sm font-medium text-brand-300">
+            Anonymous Mode
+          </div>
         </div>
       </header>
 
@@ -169,7 +223,7 @@ export default function AnonymousRoom() {
               {/* Show local preview tiny in corner while waiting */}
               {localStream && (
                 <div className="absolute bottom-24 right-4 w-48 h-64 shadow-2xl rounded-2xl overflow-hidden border border-slate-700/50 opacity-50 grayscale hover:grayscale-0 transition-all">
-                  <VideoTile stream={localStream} isLocal isMuted />
+                  <VideoTile stream={localStream} isLocal isMuted name="You" className="w-full h-full" />
                 </div>
               )}
             </motion.div>
@@ -181,19 +235,19 @@ export default function AnonymousRoom() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full h-full flex flex-col md:flex-row gap-4 max-w-7xl mx-auto"
+              className="absolute inset-0 bg-black z-0"
             >
               {/* Remote Video (Main) */}
-              <div className="flex-1 relative h-full min-h-[50vh]">
+              <div className="w-full h-full">
                 <VideoTile
                   stream={remoteStream}
                   name="Stranger"
-                  className="w-full h-full shadow-[0_0_30px_rgba(37,99,235,0.1)] border-brand-500/20"
+                  className="w-full h-full rounded-none border-none object-cover"
                 />
               </div>
 
-              {/* Local Video (PIP or side) */}
-              <div className="w-full md:w-1/3 h-64 md:h-full max-h-[50vh] md:max-h-none">
+              {/* Local Video (PIP) */}
+              <div className="absolute bottom-24 right-4 w-48 h-64 shadow-2xl rounded-2xl overflow-hidden border border-slate-700/50 transition-all z-10 hover:scale-105">
                 <VideoTile stream={localStream} isLocal isMuted name="You" className="w-full h-full" />
               </div>
             </motion.div>
