@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Video, Mic, Globe2, Shield } from "lucide-react";
+import { Video, Mic, Globe2, Shield, LogOut } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Home() {
+  const { isAuthenticated, userEmail, logout } = useAuth();
   return (
     <div className="flex-1 relative overflow-hidden flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8">
       {/* Background gradients */}
@@ -12,6 +14,24 @@ export default function Home() {
         <div className="absolute -top-[40%] -right-[10%] w-[70%] h-[70%] rounded-full bg-brand-600/20 blur-[120px]" />
         <div className="absolute -bottom-[40%] -left-[10%] w-[70%] h-[70%] rounded-full bg-indigo-600/20 blur-[120px]" />
       </div>
+
+      {isAuthenticated && userEmail && (
+        <div className="absolute top-6 right-6 z-50 flex items-center gap-4 bg-slate-800/50 backdrop-blur-md px-4 py-2 rounded-full border border-slate-700">
+          <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center font-bold text-white uppercase shadow-lg">
+            {userEmail.charAt(0)}
+          </div>
+          <span className="text-sm font-medium text-slate-300 truncate max-w-[120px] sm:max-w-none">
+            {userEmail}
+          </span>
+          <button
+            onClick={() => logout()}
+            className="text-slate-400 hover:text-white transition-colors ml-2"
+            title="Sign Out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }}

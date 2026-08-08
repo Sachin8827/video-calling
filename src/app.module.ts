@@ -14,6 +14,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { MatchmakingModule } from './matchmaking/matchmaking.module';
 import { SfuModule } from './sfu/sfu.module';
 import { GatewayModule } from './gateway/gateway.module';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -22,16 +23,14 @@ import { GatewayModule } from './gateway/gateway.module';
       load: [authConfig],
       envFilePath: '.env',
       validationSchema: Joi.object({
-        NODE_ENV: Joi.string()
-          .valid('development', 'production', 'test')
-          .default('development'),
+        NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
         PORT: Joi.number().default(3000),
         DATABASE_URL: Joi.string().required(),
         REDIS_URL: Joi.string().required(),
         JWT_SECRET: Joi.string().min(32).required(),
         JWT_ACCESS_EXPIRY: Joi.string().default('15m'),
         JWT_REFRESH_EXPIRY: Joi.string().default('7d'),
-        ALLOWED_ORIGIN: Joi.string().uri().default('http://localhost:3001'),
+        ALLOWED_ORIGIN: Joi.string().default('*'),
         TURN_SERVER_URL: Joi.string().optional(),
         TURN_USERNAME: Joi.string().optional(),
         TURN_CREDENTIAL: Joi.string().optional(),
@@ -66,6 +65,7 @@ import { GatewayModule } from './gateway/gateway.module';
     SfuModule,
     GatewayModule, // WebSocket signaling (registers SignalingGateway)
   ],
+  controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

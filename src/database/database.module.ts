@@ -12,8 +12,10 @@ export const DATABASE_POOL = 'DATABASE_POOL';
       provide: DATABASE_POOL,
       inject: [ConfigService],
       useFactory: (config: ConfigService): Pool => {
+        const isProd = config.get<string>('NODE_ENV') === 'production';
         const pool = new Pool({
           connectionString: config.getOrThrow<string>('DATABASE_URL'),
+          ssl: isProd ? { rejectUnauthorized: false } : undefined,
           min: config.get<number>('DATABASE_POOL_MIN', 2),
           max: config.get<number>('DATABASE_POOL_MAX', 10),
           idleTimeoutMillis: 30_000,

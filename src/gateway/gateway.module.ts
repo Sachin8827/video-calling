@@ -7,6 +7,7 @@ import { MatchmakingModule } from '../matchmaking/matchmaking.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { SfuModule } from '../sfu/sfu.module';
 import { JwtAlgorithm } from '../auth/constants/auth.enums';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { JwtAlgorithm } from '../auth/constants/auth.enums';
     MatchmakingModule,
     ContactsModule,
     SfuModule,
+    UsersModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

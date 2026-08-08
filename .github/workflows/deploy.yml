@@ -1,0 +1,92 @@
+name: Deploy to Amazon ECS
+
+on:
+  push:
+    branches:
+      - main
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: nexus-backend
+  ECS_SERVICE: nexus-backend-service
+  ECS_CLUSTER: nexus-cluster
+  ECS_TASK_DEFINITION: task-definition.json
+  CONTAINER_NAME: backend-container
+
+jobs:
+  deploy:
+    name: Build, Migrate & Deploy
+    runs-on: ubuntu-latest
+    # Security constraint: Only the repository owner can trigger this job
+    if: github.actor == github.repository_owner
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build a docker container and push it to ECR
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ env.ECS_TASK_DEFINITION }}
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.build-image.outputs.image }}
+
+    - name: Register new Task Definition
+      id: register-task
+      run: |
+        NEW_TASK_INFO=$(aws ecs register-task-definition --cli-input-json file://${{ steps.task-def.outputs.task-definition }} --region ${{ env.AWS_REGION }})
+        NEW_TASK_REVISION=$(echo $NEW_TASK_INFO | jq -r '.taskDefinition.taskDefinitionArn')
+        echo "task_arn=$NEW_TASK_REVISION" >> $GITHUB_OUTPUT
+
+    - name: Run Database Migration (ECS One-off Task)
+      run: |
+        echo "Fetching Subnets and Security Groups..."
+        PUBLIC_A=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=nexus-public-a" --query "Subnets[0].SubnetId" --output text)
+        PUBLIC_B=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=nexus-public-b" --query "Subnets[0].SubnetId" --output text)
+        ECS_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=nexus-ecs-sg" --query "SecurityGroups[0].GroupId" --output text)
+        
+        echo "Starting Migration Task using Revision: ${{ steps.register-task.outputs.task_arn }}"
+        aws ecs run-task \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --task-definition ${{ steps.register-task.outputs.task_arn }} \
+          --launch-type FARGATE \
+          --network-configuration "awsvpcConfiguration={subnets=[$PUBLIC_A,$PUBLIC_B],securityGroups=[$ECS_SG],assignPublicIp=ENABLED}" \
+          --overrides '{"containerOverrides":[{"name":"${{ env.CONTAINER_NAME }}","command":["npm","run","migration:run"]}]}' \
+          --region ${{ env.AWS_REGION }}
+          
+        echo "Migration task triggered successfully! Wait 30 seconds for it to finish..."
+        sleep 30
+
+    - name: Deploy Amazon ECS service
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true

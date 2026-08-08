@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useEffect, useState, useCallback } from "react";
-import { getSocket } from "@/lib/socket";
+import { useEffect, useState, useCallback } from 'react';
+import { getSocket } from '@/lib/socket';
 
 export function useSignaling() {
   const [isConnected, setIsConnected] = useState(false);
@@ -9,8 +9,8 @@ export function useSignaling() {
 
   useEffect(() => {
     // Attempt to connect immediately. If a token exists in localStorage, attach it.
-    const token = localStorage.getItem("access_token");
-    console.log("[signaling] auth token", token ? "present" : "none");
+    const token = localStorage.getItem('accessToken');
+    console.log('[signaling] auth token present?', !!token);
     if (token) {
       socket.auth = { token };
     } else {
@@ -20,34 +20,50 @@ export function useSignaling() {
     socket.connect();
 
     const onConnect = () => {
-      console.log("[signaling] connected", socket.id);
+      console.log('[signaling] connected', socket.id);
       setIsConnected(true);
     };
     const onDisconnect = () => {
-      console.log("[signaling] disconnected", socket.id);
+      console.log('[signaling] disconnected', socket.id);
       setIsConnected(false);
     };
 
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
 
     return () => {
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
       socket.disconnect();
     };
   }, [socket]);
 
   // Expose typed wrappers
-  const emit = useCallback((event: string, payload?: any) => {
-    console.log("[signaling] emit", event, payload);
-    socket.emit(event, payload);
-  }, [socket]);
+  const emit = useCallback(
+    (event: string, payload?: any) => {
+      console.log('[signaling] emit', event, payload);
+      socket.emit(event, payload);
+    },
+    [socket],
+  );
 
-  const on = useCallback((event: string, callback: (data: any) => void) => {
-    socket.on(event, callback);
-    return () => socket.off(event, callback);
-  }, [socket]);
+  const emitWithAck = useCallback(
+    async (event: string, payload?: any) => {
+      console.log('[signaling] emitWithAck', event, payload);
+      return await socket.emitWithAck(event, payload);
+    },
+    [socket],
+  );
 
-  return { isConnected, emit, on, socket };
+  const on = useCallback(
+    (event: string, callback: (data: any) => void) => {
+      socket.on(event, callback);
+      return () => {
+        socket.off(event, callback);
+      };
+    },
+    [socket],
+  );
+
+  return { isConnected, emit, emitWithAck, on, socket };
 }

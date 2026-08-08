@@ -8,7 +8,7 @@ import {
   ConnectedSocket,
   WsException,
 } from '@nestjs/websockets';
-import { UseGuards, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,6 +18,7 @@ import { ContactsService } from '../contacts/contacts.service';
 import { SfuService } from '../sfu/sfu.service';
 import { AuditService } from '../audit/audit.service';
 import { AuditEventType } from '../audit/audit-event.enum';
+import { UsersService } from '../users/users.service';
 
 /** Metadata stored per connected socket. */
 interface SocketMeta {
@@ -56,7 +57,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly contactsService: ContactsService,
     private readonly sfuService: SfuService,
     private readonly auditService: AuditService,
-  ) { }
+    private readonly usersService: UsersService,
+  ) {}
 
   // ── Connection ───────────────────────────────────────────────────────────
 
@@ -83,7 +85,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
             this.userSockets.set(userId, new Set([socket.id]));
           }
         }
-      } catch {
+      } catch (err) {
+        this.logger.warn(`Invalid token for socket ${socket.id}: ${(err as Error).message}`);
         // Invalid token — treat as anonymous
       }
     }
@@ -104,7 +107,9 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     const meta = this.sockets.get(socket.id);
     if (!meta) return;
 
-    this.logger.log(`Socket disconnected: ${socket.id} userId=${meta.userId ?? 'anon'} callId=${meta.callId ?? 'none'}`);
+    this.logger.log(
+      `Socket disconnected: ${socket.id} userId=${meta.userId ?? 'anon'} callId=${meta.callId ?? 'none'}`,
+    );
 
     // Clean up matchmaking queue
     await this.matchmaking.dequeue(socket.id);
@@ -157,10 +162,27 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('call:initiate')
   async onCallInitiate(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() data: { targetUserId: string; callType: 'voice' | 'video' },
-  ) {
+    @MessageBody()
+    data: { targetEmail?: string; targetUserId?: string; callType: 'voice' | 'video' },
+  ): Promise<{ callId: string }> {
     const meta = this.getMeta(socket);
-    this.logger.log(`call:initiate request from ${socket.id} target=${data.targetUserId} callType=${data.callType}`);
+
+    let targetId = data.targetUserId;
+    if (data.targetEmail) {
+      const targetUser = await this.usersService.findByEmail(data.targetEmail.trim().toLowerCase());
+      if (!targetUser) {
+        throw new WsException('User not found with that email address');
+      }
+      targetId = targetUser.id;
+    }
+
+    if (!targetId) {
+      throw new WsException('targetUserId or targetEmail must be provided');
+    }
+
+    this.logger.log(
+      `call:initiate request from ${socket.id} target=${targetId} callType=${data.callType}`,
+    );
 
     const session = await this.callsService.initiateCall({
       initiatorId: meta.userId ?? meta.anonymousId,
@@ -175,17 +197,18 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     await socket.join(session.id); // use callId as room
 
     // Track intended target for authorization on accept (BUG-9 fix)
-    this.pendingCallTargets.set(session.id, data.targetUserId);
-    this.logger.log(`call:initiate created session ${session.id} pendingTarget=${data.targetUserId}`);
+    this.pendingCallTargets.set(session.id, targetId);
+    this.logger.log(`call:initiate created session ${session.id} pendingTarget=${targetId}`);
 
     // Notify target if online (use first socket from their set)
-    const targetSocketSet = this.userSockets.get(data.targetUserId);
+    const targetSocketSet = this.userSockets.get(targetId);
     if (targetSocketSet && targetSocketSet.size > 0) {
       // Notify ALL of the target's tabs
       for (const sid of targetSocketSet) {
         this.server.to(sid).emit('call:incoming', {
           callId: session.id,
           callerId: meta.userId,
+          partnerUserId: meta.userId,
           callType: data.callType,
         });
       }
@@ -217,9 +240,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onCallAccept(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; callType: 'voice' | 'video' },
-  ) {
+  ): Promise<{ ok: boolean }> {
     const meta = this.getMeta(socket);
-    this.logger.log(`call:accept request from ${socket.id} callId=${data.callId} callType=${data.callType}`);
+    this.logger.log(
+      `call:accept request from ${socket.id} callId=${data.callId} callType=${data.callType}`,
+    );
     if (!meta.userId) throw new WsException('Authentication required');
 
     // BUG-9 fix: Verify the acceptor is the intended target
@@ -228,7 +253,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       throw new WsException('You are not the intended recipient of this call');
     }
 
-    await this.callsService.acceptCall({
+    const session = await this.callsService.acceptCall({
       callId: data.callId,
       userId: meta.userId,
       callType: data.callType,
@@ -247,13 +272,20 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
     this.pendingCallTargets.delete(data.callId);
 
-    this.server.to(data.callId).emit('call:accepted', { callId: data.callId });
+    this.server.to(data.callId).emit('call:accepted', {
+      callId: data.callId,
+      acceptorId: meta.userId,
+      initiatorId: session.initiatorId,
+    });
     this.logger.log(`call:accepted emitted for ${data.callId}`);
     return { ok: true };
   }
 
   @SubscribeMessage('call:reject')
-  async onCallReject(@ConnectedSocket() socket: Socket, @MessageBody() data: { callId: string }) {
+  async onCallReject(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: { callId: string },
+  ): Promise<{ ok: boolean }> {
     const meta = this.getMeta(socket);
     this.logger.log(`call:reject request from ${socket.id} callId=${data.callId}`);
     if (!meta.userId) throw new WsException('Authentication required');
@@ -280,7 +312,10 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('call:end')
-  async onCallEnd(@ConnectedSocket() socket: Socket, @MessageBody() data: { callId: string }) {
+  async onCallEnd(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: { callId: string },
+  ): Promise<{ ok: boolean }> {
     const meta = this.getMeta(socket);
     this.logger.log(`call:end request from ${socket.id} callId=${data.callId}`);
 
@@ -314,7 +349,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   onOffer(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; sdp: unknown },
-  ) {
+  ): void {
     socket.to(data.callId).emit('signal:offer', { callId: data.callId, sdp: data.sdp });
   }
 
@@ -322,7 +357,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   onAnswer(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; sdp: unknown },
-  ) {
+  ): void {
     socket.to(data.callId).emit('signal:answer', { callId: data.callId, sdp: data.sdp });
   }
 
@@ -330,7 +365,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   onIce(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; candidate: unknown },
-  ) {
+  ): void {
     socket.to(data.callId).emit('signal:ice', { callId: data.callId, candidate: data.candidate });
   }
 
@@ -340,7 +375,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onMediaToggle(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; mic?: boolean; camera?: boolean },
-  ) {
+  ): Promise<{ ok: boolean }> {
     const meta = this.getMeta(socket);
 
     await this.callsService.toggleMedia({
@@ -366,7 +401,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onSwitchType(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; newType: 'voice' | 'video' },
-  ) {
+  ): Promise<{ ok: boolean }> {
     const meta = this.getMeta(socket);
     await this.callsService.toggleCallType({
       callId: data.callId,
@@ -390,7 +425,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onJoinQueue(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { preferredType?: 'voice' | 'video' },
-  ) {
+  ): Promise<{ queued: boolean; onlineUsers: number; searchingUsers: number }> {
     const meta = this.getMeta(socket);
     this.logger.log(`match:join-queue from ${socket.id} preferredType=${data.preferredType}`);
 
@@ -415,7 +450,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('match:leave-queue')
-  async onLeaveQueue(@ConnectedSocket() socket: Socket) {
+  async onLeaveQueue(@ConnectedSocket() socket: Socket): Promise<{ ok: boolean }> {
     this.logger.log(`match:leave-queue from ${socket.id}`);
     await this.matchmaking.dequeue(socket.id);
     await this.broadcastQueueStatus();
@@ -423,10 +458,12 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('match:queue-status-request')
-  async onQueueStatusRequest(@ConnectedSocket() socket: Socket) {
+  async onQueueStatusRequest(@ConnectedSocket() socket: Socket): Promise<any> {
     const onlineUsers = this.sockets.size;
     const searchingUsers = await this.matchmaking.queueDepth();
-    this.logger.log(`match:queue-status-request => online=${onlineUsers}, searching=${searchingUsers}`);
+    this.logger.log(
+      `match:queue-status-request => online=${onlineUsers}, searching=${searchingUsers}`,
+    );
     socket.emit('match:queue-status', { onlineUsers, searchingUsers });
     return { onlineUsers, searchingUsers };
   }
@@ -492,7 +529,9 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       // Notify both parties of the match
       const bothRegistered = !!a.userId && !!b.userId;
-      this.logger.log(`match:found emit for ${a.socketId} and ${b.socketId} callId=${session.id} initiator=${a.socketId}`);
+      this.logger.log(
+        `match:found emit for ${a.socketId} and ${b.socketId} callId=${session.id} initiator=${a.socketId}`,
+      );
 
       this.server.to(a.socketId).emit('match:found', {
         callId: session.id,
@@ -511,7 +550,10 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
     } catch (error) {
       const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
-      this.logger.error(`tryPairUsers error`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(
+        `tryPairUsers error`,
+        error instanceof Error ? error : new Error(String(error)),
+      );
       this.logger.error(`tryPairUsers raw error`, errorDetails);
       console.error('tryPairUsers caught error:', error);
       throw error;
@@ -521,7 +563,10 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   // ── SFU (Group Calls) ─────────────────────────────────────────────────────
 
   @SubscribeMessage('sfu:join')
-  async onSfuJoin(@ConnectedSocket() socket: Socket, @MessageBody() data: { roomId: string }) {
+  async onSfuJoin(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: { roomId: string },
+  ): Promise<{ routerRtpCapabilities: unknown }> {
     if (!this.sfuService.isAvailable()) {
       throw new WsException('Group calls not available — MediaSoup not initialised');
     }
@@ -558,7 +603,9 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onCreateTransport(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { roomId: string },
-  ) {
+  ): Promise<any> {
+    // Using any to pass Mediasoup complex types back
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transportParams = await this.sfuService.createWebRtcTransport(data.roomId, socket.id);
     return transportParams;
   }
@@ -567,10 +614,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onConnectTransport(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { roomId: string; transportId: string; dtlsParameters: unknown },
-  ) {
+  ): Promise<{ ok: boolean }> {
     await this.sfuService.connectTransport(
       data.roomId,
       data.transportId,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data.dtlsParameters as any,
     );
     return { ok: true };
@@ -586,11 +634,12 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       kind: 'audio' | 'video';
       rtpParameters: unknown;
     },
-  ) {
+  ): Promise<{ producerId: string }> {
     const { producerId } = await this.sfuService.produce(
       data.roomId,
       data.transportId,
       data.kind,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data.rtpParameters as any,
       socket.id,
     );
@@ -611,11 +660,12 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       rtpCapabilities: unknown;
       transportId: string;
     },
-  ) {
+  ): Promise<any> {
     const params = await this.sfuService.consume(
       data.roomId,
       socket.id,
       data.producerId,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data.rtpCapabilities as any,
       data.transportId,
     );
@@ -626,7 +676,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onResumeConsumer(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { roomId: string; consumerId: string },
-  ) {
+  ): Promise<{ ok: boolean }> {
     await this.sfuService.resumeConsumer(data.roomId, data.consumerId);
     return { ok: true };
   }
@@ -637,7 +687,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   async onRequestContactSave(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; toUserId: string },
-  ) {
+  ): Promise<{ requestId: string }> {
     const meta = this.getMeta(socket);
     if (!meta.userId) throw new WsException('Must be registered to save contacts');
 

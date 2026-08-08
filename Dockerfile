@@ -1,6 +1,7 @@
-FROM node:20-bookworm
+# ── STAGE 1: Builder ──
+FROM node:20-bookworm AS builder
 
-# Install build dependencies for MediaSoup and native compilation
+# Install heavy C++ compilers for MediaSoup
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -9,15 +10,27 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# Copy dependency definitions
 COPY package*.json ./
-
-# Install dependencies with legacy peer deps
+# Install ALL dependencies (including MediaSoup C++ workers)
 RUN npm install --legacy-peer-deps
-
-# Copy the rest of the application files
 COPY . .
+# Build the NestJS app (compiles TypeScript to dist/)
+RUN npm run build
 
-# Run development command by default
-CMD ["npm", "run", "start:dev"]
+
+# ── STAGE 2: Production Runtime ──
+# Use 'slim' version which is 800MB smaller than standard bookworm
+FROM node:20-bookworm-slim 
+
+WORKDIR /app
+
+# Only copy what's absolutely necessary from the builder stage
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+
+# Optional: MediaSoup runtime dependencies (much smaller than build tools)
+RUN apt-get update && apt-get install -y net-tools iproute2 && rm -rf /var/lib/apt/lists/*
+
+# Run production command
+CMD ["npm", "run", "start:prod"]

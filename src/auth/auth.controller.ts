@@ -8,13 +8,13 @@ import {
   Req,
   Res,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt.guard';
-import { CsrfGuard } from './guards/csrf.guard';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
@@ -27,7 +27,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 @ApiTags('auth')
 @Controller('auth')
-@UseGuards(JwtAuthGuard, CsrfGuard)
+@UseGuards(JwtAuthGuard)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
@@ -59,14 +59,18 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ accessToken: string; expiresIn: number }> {
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
     const tokens = await this.authService.login(
       dto,
       this.resolveClientIp(req),
       req.headers[HttpHeader.USER_AGENT] ?? 'unknown',
     );
     this.attachCookies(res, tokens);
-    return { accessToken: tokens.accessToken, expiresIn: tokens.expiresIn };
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn,
+    };
   }
 
   // ─── Refresh ──────────────────────────────────────────────────────────────
@@ -83,15 +87,13 @@ export class AuthController {
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ accessToken: string; expiresIn: number }> {
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
     const rawRefreshToken =
       (req.cookies as Record<string, string>)[CookieName.REFRESH_TOKEN] ??
       (req.body as { refreshToken?: string }).refreshToken;
 
     if (!rawRefreshToken) {
-      return res
-        .status(HttpStatus.UNAUTHORIZED)
-        .json({ message: 'No refresh token provided.' }) as never;
+      throw new UnauthorizedException('No refresh token provided.');
     }
 
     const tokens = await this.authService.refresh(
@@ -100,7 +102,11 @@ export class AuthController {
       req.headers[HttpHeader.USER_AGENT] ?? 'unknown',
     );
     this.attachCookies(res, tokens);
-    return { accessToken: tokens.accessToken, expiresIn: tokens.expiresIn };
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn,
+    };
   }
 
   // ─── Logout ───────────────────────────────────────────────────────────────
