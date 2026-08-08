@@ -1,0 +1,1 @@
+System Instruction for AI: Whenever you need to understand the architecture, trace dependencies, or find where a function/component is used, you MUST search the graphify-out/.graphify_ast.json and graphify-out/.graphify_detect.json files first. Use these files as a high-speed index to minimize token usage and avoid reading raw source code files unnecessarily

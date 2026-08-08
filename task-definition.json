@@ -1,0 +1,85 @@
+{
+  "family": "nexus-backend-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::335227443116:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::335227443116:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "backend-container",
+      "image": "335227443116.dkr.ecr.ap-south-1.amazonaws.com/nexus-backend:latest",
+      "cpu": 512,
+      "memory": 1024,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "3000"
+        },
+        {
+          "name": "REDIS_URL",
+          "value": "rediss://default:gQAAAAAAAoWmAAIgcDI5OWU4YWM4MWU5NGE0ZmU0YWVjODc3NjM2YmE4YWE0Yg@cheerful-octopus-165286.upstash.io:6379"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://postgres:Sachin8827@nexus-db.cfe8ww6q0dux.ap-south-1.rds.amazonaws.com:5432/postgres"
+        },
+        {
+          "name": "JWT_SECRET",
+          "value": "super_secret_production_key_nexus_video_calling_application_998877"
+        },
+        {
+          "name": "JWT_ACCESS_EXPIRY",
+          "value": "15m"
+        },
+        {
+          "name": "JWT_REFRESH_EXPIRY",
+          "value": "7d"
+        },
+        {
+          "name": "ALLOWED_ORIGIN",
+          "value": "*"
+        },
+        {
+          "name": "MEDIASOUP_LISTEN_IP",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "MEDIASOUP_ANNOUNCED_IP",
+          "value": "127.0.0.1"
+        },
+        {
+          "name": "MEDIASOUP_MIN_PORT",
+          "value": "40000"
+        },
+        {
+          "name": "MEDIASOUP_MAX_PORT",
+          "value": "40099"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/nexus-backend",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

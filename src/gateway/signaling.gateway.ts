@@ -458,7 +458,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('match:queue-status-request')
-  async onQueueStatusRequest(@ConnectedSocket() socket: Socket): Promise<void> {
+  async onQueueStatusRequest(@ConnectedSocket() socket: Socket): Promise<any> {
     const onlineUsers = this.sockets.size;
     const searchingUsers = await this.matchmaking.queueDepth();
     this.logger.log(
