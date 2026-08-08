@@ -28,9 +28,11 @@ WORKDIR /app
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/src/database/migrations ./src/database/migrations
 
 # Optional: MediaSoup runtime dependencies (much smaller than build tools)
-RUN apt-get update && apt-get install -y net-tools iproute2 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y net-tools iproute2 postgresql-client && rm -rf /var/lib/apt/lists/*
 
 # Run production command
 CMD ["npm", "run", "start:prod"]
